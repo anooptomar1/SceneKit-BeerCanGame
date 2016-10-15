@@ -27,7 +27,15 @@ import SpriteKit
 
 class GameViewController: UIViewController {
   
+  // Scene properties
   let helper = GameHelper()
+  var menuScene = SCNScene(named: "resources.scnassets/Menu.scn")!
+  var levelScene = SCNScene(named: "resources.scnassets/Level.scn")!
+  
+  // Node properties
+  var cameraNode: SCNNode!
+  var shelfNode: SCNNode!
+  var baseCanNode: SCNNode!
   
   // Accessor for the SCNView
   var scnView: SCNView {
@@ -38,14 +46,127 @@ class GameViewController: UIViewController {
     return scnView
   }
   
+  // Node that intercepts touches in the scene
+  lazy var touchCatchingPlaneNode: SCNNode = {
+    let node = SCNNode(geometry: SCNPlane(width: 40, height: 40))
+    node.opacity = 0.001
+    node.castsShadow = false
+    
+    return node
+  }()
+  
   override func viewDidLoad() {
     super.viewDidLoad()
     
+    presentMenu()
+    createScene()
+    
+  }
+  
+  // MARK: - Helpers
+  
+  func presentMenu() {
+    let hudNode = menuScene.rootNode.childNode(withName: "hud", recursively: true)!
+    hudNode.geometry?.materials = [helper.menuHUDMaterial]
+    hudNode.rotation  = SCNVector4(x: 1, y: 0, z: 0, w: Float(M_PI))
+    
+    helper.state = .tapToPlay
+    
+    let transition = SKTransition.crossFade(withDuration: 1.0)
+    scnView.present(menuScene, with: transition, incomingPointOfView: nil, completionHandler: nil)
+  }
+  
+  func presentLevel() {
+    setupNextLevel()
+    helper.state = .playing
+    let transition = SKTransition.crossFade(withDuration: 1.0)
+    scnView.present(levelScene, with: transition, incomingPointOfView: nil, completionHandler: nil)
+  }
+  
+  func setupNextLevel() {
+    if helper.ballNodes.count > 0 {
+      helper.ballNodes.removeLast()
+    }
+    
+    let level = helper.levels[helper.currentLevel]
+    for idx in 0..<level.canPositions.count {
+      let canNode = baseCanNode.clone()
+      canNode.geometry = baseCanNode.geometry?.copy() as? SCNGeometry
+      canNode.geometry?.firstMaterial = baseCanNode.geometry?.firstMaterial?.copy() as? SCNMaterial
+      
+      let shouldCreateBaseVariation = GKRandomSource.sharedRandom().nextInt() % 2 == 0
+      
+      canNode.eulerAngles = SCNVector3(x: 0, y: shouldCreateBaseVariation ? -110 : 55, z: 0)
+      canNode.name = "Can #\(idx)"
+      
+      if let materials = canNode.geometry?.materials {
+        for material in materials where material.multiply.contents != nil {
+          if shouldCreateBaseVariation {
+            material.multiply.contents = "resources.scnassets/Can_Diffuse-2.png"
+          } else {
+            material.multiply.contents = "resources.scnassets/Can_Diffuse-1.png"
+          }
+        }
+      }
+      
+      let canPhysicsBody = SCNPhysicsBody(type: .dynamic, shape: SCNPhysicsShape(geometry: SCNCylinder(radius: 0.33, height: 1.125), options: nil))
+      canPhysicsBody.mass = 0.75
+      canPhysicsBody.contactTestBitMask = 1
+      canNode.physicsBody = canPhysicsBody
+      
+      canNode.position = level.canPositions[idx]
+      
+      levelScene.rootNode.addChildNode(canNode)
+      helper.canNodes.append(canNode)
+    }
+    
+  }
+  
+  func createLevelsFrom(baseNode: SCNNode) {
+    // Level 1
+    let levelOneCanOne = SCNVector3(x: baseNode.position.x - 0.5, y: baseNode.position.y + 0.62, z: baseNode.position.z)
+    let levelOneCanTwo = SCNVector3(x: baseNode.position.x + 0.5, y: baseNode.position.y + 0.62, z: baseNode.position.z)
+    let levelOneCanThree = SCNVector3(x: baseNode.position.x, y: baseNode.position.y + 1.75, z: baseNode.position.z)
+    
+    let levelOne = GameLevel(canPositions: [levelOneCanOne, levelOneCanTwo, levelOneCanThree])
+    
+    // Level 2
+    let levelTwoCanOne = SCNVector3(x: baseNode.position.x - 0.65, y: baseNode.position.y + 0.62, z: baseNode.position.z)
+    let levelTwoCanTwo = SCNVector3(x: baseNode.position.x - 0.65, y: baseNode.position.y + 1.75, z: baseNode.position.z)
+    let levelTwoCanThree = SCNVector3(x: baseNode.position.x + 0.65, y: baseNode.position.y + 0.62, z: baseNode.position.z)
+    let levelTwoCanFour = SCNVector3(x: baseNode.position.x + 0.65, y: baseNode.position.y + 1.75, z: baseNode.position.z)
+    
+    let levelTwo = GameLevel(canPositions: [levelTwoCanOne, levelTwoCanTwo, levelTwoCanThree, levelTwoCanFour])
+    
+    helper.levels = [levelOne, levelTwo]
+  }
+  
+  // MARK: - Creation
+  func createScene() {
+    cameraNode = levelScene.rootNode.childNode(withName: "camera", recursively: true)!
+    shelfNode = levelScene.rootNode.childNode(withName: "shelf", recursively: true)!
+    
+    guard let canScene = SCNScene(named: "resources.scnassets/Can.scn") else { return }
+    baseCanNode = canScene.rootNode.childNode(withName: "can", recursively: true)!
+    
+    let shelfPhysicsBody = SCNPhysicsBody(type: .static, shape: SCNPhysicsShape(geometry: shelfNode.geometry!))
+    shelfPhysicsBody.isAffectedByGravity = false
+    shelfNode.physicsBody = shelfPhysicsBody
+    
+    levelScene.rootNode.addChildNode(touchCatchingPlaneNode)
+    touchCatchingPlaneNode.position = SCNVector3(x: 0, y: 0, z: shelfNode.position.z)
+    touchCatchingPlaneNode.eulerAngles = cameraNode.eulerAngles
+    
+    createLevelsFrom(baseNode: shelfNode)
   }
   
   // MARK: - Touches
   override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
     super.touchesBegan(touches, with: event)
+    
+    if helper.state == .tapToPlay {
+      presentLevel()
+    }
     
   }
   
